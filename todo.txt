@@ -1,0 +1,5 @@
+Implementing logic for the other root types (S, T, C)? 
+Adding a game-end condition or scoring system?
+Improving the visual feedback for players?
+Adding more detailed instructions or a tutorial for new players?
+when you click piece button, branch, piece the branch deselects. 
