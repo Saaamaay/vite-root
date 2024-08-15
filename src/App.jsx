@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { canPlacePrimary, getValidPlacements } from './PlacementLogic';
+import { getValidPlacements } from './PlacementLogic';
 
 const PLAYER_COLORS = ['bg-gray-200', 'bg-blue-200'];
 const ROOT_TYPES = ['B', 'P', 'S', 'T', 'C'];
@@ -55,44 +55,153 @@ const RootRivalsGame = () => {
     }
   };
 
-  const handleCellClick = (row, col) => {
-    if (board[row][col] !== null) return;
+// Main function to handle cell clicks on the game board
+const handleCellClick = (row, col) => {
+  // If no root type is selected, do nothing
+  if (!selectedRootType) return;
 
-    if (!bulbPlaced[currentPlayer] && selectedRootType === 'B') {
-      const newBoard = [...board];
-      newBoard[row][col] = `P${currentPlayer + 1}${selectedRootType}`;
-      setBoard(newBoard);
+  // If the bulb hasn't been placed and the selected root type is 'B', place the bulb
+  if (!bulbPlaced[currentPlayer] && selectedRootType === 'B') {
+    placeBulb(row, col);
+  } 
+  // Otherwise, if a root type and branch are selected, and the placement is valid, place the root
+  else if (selectedRootType && selectedBranch && validPlacements.some(([r, c]) => r === row && c === col)) {
+    placeRoot(row, col);
+  }
+};
 
-      const newResources = [...resources];
-      newResources[currentPlayer].B -= 1;
-      setResources(newResources);
+// Function to place the bulb on the board
+const placeBulb = (row, col) => {
+  // Create a new board with the bulb placed
+  const newBoard = [...board];
+  newBoard[row][col] = `P${currentPlayer + 1}${selectedRootType}`;
+  setBoard(newBoard);
 
-      const newBulbPlaced = [...bulbPlaced];
-      newBulbPlaced[currentPlayer] = true;
-      setBulbPlaced(newBulbPlaced);
+  // Update the player's resources (decrease bulb count)
+  const newResources = [...resources];
+  newResources[currentPlayer].B -= 1;
+  setResources(newResources);
 
-      setCurrentPlayer(1 - currentPlayer);
-      setSelectedRootType(null);
-    } else if (selectedRootType && selectedBranch && validPlacements.some(([r, c]) => r === row && c === col)) {
-      const newBoard = [...board];
-      newBoard[row][col] = `P${currentPlayer + 1}${selectedRootType}`;
-      setBoard(newBoard);
+  // Mark that the current player has placed their bulb
+  const newBulbPlaced = [...bulbPlaced];
+  newBulbPlaced[currentPlayer] = true;
+  setBulbPlaced(newBulbPlaced);
 
-      const newResources = [...resources];
-      newResources[currentPlayer][selectedRootType] -= 1;
-      setResources(newResources);
+  // End the turn
+  endTurn();
+};
 
-      const newBranches = [...branches];
-      newBranches[currentPlayer][selectedBranch] = {
-        status: 'On',
-        roots: [...newBranches[currentPlayer][selectedBranch].roots, { type: selectedRootType, position: [row, col] }]
-      };
-      setBranches(newBranches);
+// Function to place a root on the board
+const placeRoot = (row, col) => {
+  const newBoard = [...board];
+  const currentCell = newBoard[row][col];
+  // Check if this is an attack (Tertiary root placed on non-empty cell)
+  const isAttack = selectedRootType === 'T' && currentCell !== null;
 
-      setCurrentPlayer(1 - currentPlayer);
-      setSelectedRootType(null);
-      setSelectedBranch(null);
+  // If it's an attack, handle it
+  if (isAttack) {
+    const attackedPlayer = parseInt(currentCell[1]) - 1;
+    const attackedRootType = currentCell[2];
+    handleAttack(attackedPlayer, attackedRootType, row, col);
+  }
+
+  // Place the new root on the board
+  newBoard[row][col] = `P${currentPlayer + 1}${selectedRootType}`;
+  setBoard(newBoard);
+
+  // Update the player's resources
+  const newResources = [...resources];
+  newResources[currentPlayer][selectedRootType] -= 1;
+  setResources(newResources);
+
+  // Update the player's branch information
+  const newBranches = [...branches];
+  newBranches[currentPlayer][selectedBranch] = {
+    status: 'On',
+    roots: [...newBranches[currentPlayer][selectedBranch].roots, { type: selectedRootType, position: [row, col] }]
+  };
+  setBranches(newBranches);
+
+  // End the turn
+  endTurn();
+};
+
+const handleAttack = (attackedPlayer, attackedRootType, row, col) => {
+  const newBranches = [...branches];
+  // Find the attacked branch
+  const attackedBranch = Object.keys(newBranches[attackedPlayer]).find(branch => 
+    newBranches[attackedPlayer][branch].roots.some(root => 
+      root.position[0] === row && root.position[1] === col
+    )
+  );
+
+  if (attackedBranch) {
+    // Find the index of the attacked root
+    const rootIndex = newBranches[attackedPlayer][attackedBranch].roots.findIndex(
+      root => root.position[0] === row && root.position[1] === col
+    );
+
+    // Remove the attacked root and all subsequent roots
+    const removedRoots = newBranches[attackedPlayer][attackedBranch].roots.splice(rootIndex);
+
+    // Update the board by removing the attacked root and subsequent roots
+    const newBoard = [...board];
+    removedRoots.forEach(root => {
+      newBoard[root.position[0]][root.position[1]] = null;
+    });
+    setBoard(newBoard);
+
+    // Update the "last placed" marker for the affected branch
+    let lastPlacedIndex = rootIndex - 1;
+    while (lastPlacedIndex >= 0) {
+      const root = newBranches[attackedPlayer][attackedBranch].roots[lastPlacedIndex];
+      if (root.type === 'P' || root.type === 'S') {
+        newBranches[attackedPlayer][attackedBranch].lastPlaced = root;
+        break;
+      }
+      lastPlacedIndex--;
     }
+
+    // If no Primary or Secondary root is found, the branch is now empty
+    if (lastPlacedIndex < 0) {
+      newBranches[attackedPlayer][attackedBranch].status = 'Off';
+      newBranches[attackedPlayer][attackedBranch].lastPlaced = null;
+    }
+
+    // Update the branches state
+    setBranches(newBranches);
+
+    // Optionally, update the resources of the attacked player
+    // const newResources = [...resources];
+    // removedRoots.forEach(root => {
+    //   newResources[attackedPlayer][root.type] += 1;
+    // });
+    // setResources(newResources);
+  }
+};
+
+  const endTurn = () => {
+    setCurrentPlayer(1 - currentPlayer);
+    setSelectedRootType(null);
+    setSelectedBranch(null);
+  };
+
+  const getCellColor = (cell, rowIndex, colIndex) => {
+    const opponentPlayer = currentPlayer === 0 ? 2 : 1;
+    const isValidPlacement = validPlacements.some(([r, c]) => r === rowIndex && c === colIndex);
+    
+    if (isValidPlacement) {
+      if (selectedRootType === 'T' && cell && cell.startsWith(`P${opponentPlayer}`)) {
+        return 'bg-red-200'; // Light red (salmon) for attackable cells
+      }
+      return 'bg-green-200'; // Green for valid placements
+    }
+    
+    if (cell) {
+      return PLAYER_COLORS[parseInt(cell[1]) - 1];
+    }
+    
+    return 'bg-white';
   };
 
   const renderBoard = () => (
@@ -101,10 +210,7 @@ const RootRivalsGame = () => {
         row.map((cell, colIndex) => (
           <div
             key={`${rowIndex}-${colIndex}`}
-            className={`w-full h-full border border-gray-300 flex items-center justify-center ${
-              cell ? PLAYER_COLORS[parseInt(cell[1]) - 1] : 
-              validPlacements.some(([r, c]) => r === rowIndex && c === colIndex) ? 'bg-green-200' : 'bg-white'
-            }`}
+            className={`w-full h-full border border-gray-300 flex items-center justify-center ${getCellColor(cell, rowIndex, colIndex)}`}
             style={{ aspectRatio: '1 / 1' }}
             onClick={() => handleCellClick(rowIndex, colIndex)}
           >

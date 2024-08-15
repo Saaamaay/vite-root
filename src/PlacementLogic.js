@@ -1,4 +1,15 @@
+
+
+
+const isLastPrimaryLastPlaced = (branchRoots) => {
+  const lastPrimary = findLastPrimary(branchRoots);
+  const lastPlaced = findLastPlacedPrimaryOrSecondary(branchRoots);
+  return lastPrimary && lastPlaced && lastPrimary === lastPlaced;
+};
+
 export const canPlacePrimary = (board, currentPlayer, row, col, branches, selectedBranch) => {
+  if (board[row][col] !== null) return false;
+  
   const bulbPosition = findBulbPosition(board, currentPlayer);
   if (!bulbPosition) return false;
 
@@ -7,6 +18,8 @@ export const canPlacePrimary = (board, currentPlayer, row, col, branches, select
   if (branchRoots.length === 0) {
     return isAdjacentInDirection(bulbPosition, [row, col], selectedBranch);
   } else {
+    if (!isLastPrimaryLastPlaced(branchRoots)) return false;
+
     const lastPrimary = findLastPrimary(branchRoots);
     const direction = getDirection(selectedBranch);
     const validCells = getValidAdjacentCells(lastPrimary.position, direction);
@@ -27,6 +40,8 @@ const getValidAdjacentCells = (position, direction) => {
 
 
 export const canPlaceSecondary = (board, currentPlayer, row, col, branches, selectedBranch) => {
+  if (board[row][col] !== null) return false;
+  
   const branchRoots = branches[currentPlayer][selectedBranch].roots;
   if (branchRoots.length === 0) return false;
 
@@ -38,6 +53,48 @@ export const canPlaceSecondary = (board, currentPlayer, row, col, branches, sele
 
   return validCells.some(([validRow, validCol]) => 
     validRow === row && validCol === col
+  );
+};
+
+export const canPlaceControl = (board, currentPlayer, row, col, branches, selectedBranch) => {
+  if (board[row][col] !== null) return false;
+  
+  const branchRoots = branches[currentPlayer][selectedBranch].roots;
+  if (branchRoots.length === 0) return false;
+
+  const lastPiece = findLastPlacedPrimaryOrSecondary(branchRoots);
+  if (!lastPiece || (lastPiece.type !== "S" )) return false;
+
+  const direction = getDirection(selectedBranch);
+  const validCells = getValidAdjacentCells(lastPiece.position, direction);
+
+  return validCells.some(([validRow, validCol]) => 
+    validRow === row && validCol === col
+  );
+};
+
+// Helper function to check if a cell is valid for tertiary placement
+const isValidCellForTertiary = (cell, opponentPlayerNum) => {
+  return cell === null || (cell.startsWith(`P${opponentPlayerNum}`) && (cell.endsWith('S') || cell.endsWith('P')));
+};
+
+export const canPlaceTertiary = (board, currentPlayer, row, col, branches, selectedBranch) => {
+  const branchRoots = branches[currentPlayer][selectedBranch].roots;
+  if (branchRoots.length === 0) return false;
+
+  const lastPiece = findLastPlacedPrimaryOrSecondary(branchRoots);
+  if (!lastPiece || (lastPiece.type !== "S" )) return false;
+
+  const direction = getDirection(selectedBranch);
+  const validCells = getValidAdjacentCells(lastPiece.position, direction);
+
+  const opponentPlayer = currentPlayer === 0 ? 2:1 ; // Note: Player numbers are 1 and 2 in the board state
+  console.log("opponentplayernumber:" + currentPlayer);
+
+  return validCells.some(([validRow, validCol]) => 
+    validRow === row && 
+    validCol === col && 
+    isValidCellForTertiary(board[row][col], opponentPlayer),
   );
 };
 
@@ -92,20 +149,25 @@ const getDirection = (direction) => {
 export const getValidPlacements = (board, currentPlayer, selectedRootType, branches, selectedBranch) => {
   const validPlacements = [];
 
-  for (let i = 0; i < board.length; i++) {
-    for (let j = 0; j < board[i].length; j++) {
-      if (board[i][j] === null) {
-        if (selectedRootType === 'B') {
-          validPlacements.push([i, j]);
-        } else if (selectedRootType === 'P' && selectedBranch && canPlacePrimary(board, currentPlayer, i, j, branches, selectedBranch)) {
-          validPlacements.push([i, j]);
-        } else if (selectedRootType === 'S' && selectedBranch && canPlaceSecondary(board, currentPlayer, i, j, branches, selectedBranch)) {
-          validPlacements.push([i, j]);
-        }
-        // Add more conditions for other root types here (T, C)
-      }
-    }
-  }
+  const canPlace = {
+    B: () => true,
+    P: (i, j) => canPlacePrimary(board, currentPlayer, i, j, branches, selectedBranch),
+    S: (i, j) => canPlaceSecondary(board, currentPlayer, i, j, branches, selectedBranch),
+    C: (i, j) => canPlaceControl(board, currentPlayer, i, j, branches, selectedBranch),
+    T: (i, j) => canPlaceTertiary(board, currentPlayer, i, j, branches, selectedBranch)
+  };
 
+  board.forEach((row, i) => {
+    row.forEach((cell, j) => {
+      if (selectedBranch && canPlace[selectedRootType](i, j)) {
+        validPlacements.push([i, j]);
+      }
+    });
+  });
+
+  console.log(validPlacements);
   return validPlacements;
 };
+
+
+
