@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getValidPlacements } from './PlacementLogic';
+import GameHistoryLog from './gameHistory';
 
 const PLAYER_COLORS = ['bg-gray-200', 'bg-blue-200'];
 const ROOT_TYPES = ['B', 'P', 'S', 'T', 'C'];
@@ -10,6 +11,7 @@ const BRANCHES = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
 const initializeBoard = () => Array(8).fill().map(() => Array(8).fill(null));
 const initializeResources = () => ({ B: 1, P: 6, S: 12, T: 6, C: 6 });
 const initializeBranches = () => BRANCHES.reduce((acc, branch) => ({ ...acc, [branch]: { status: 'Off', roots: [] } }), {});
+const initializeZones = () => [null, null, null, null];
 
 const RootRivalsGame = () => {
   const [board, setBoard] = useState(initializeBoard());
@@ -21,6 +23,10 @@ const RootRivalsGame = () => {
   const [bulbPlaced, setBulbPlaced] = useState([false, false]);
   const [validPlacements, setValidPlacements] = useState([]);
   const [error, setError] = useState(null);
+  const [zones, setZones] = useState(initializeZones());
+  const [winner, setWinner] = useState(null);
+  const [gameHistory, setGameHistory] = useState([]);
+
 
   useEffect(() => {
     if (selectedRootType === 'B' || (selectedRootType && selectedBranch && bulbPlaced[currentPlayer])) {
@@ -55,6 +61,10 @@ const RootRivalsGame = () => {
     }
   };
 
+  const addToGameHistory = (action) => {
+    setGameHistory(prevHistory => [...prevHistory, action]);
+  };
+
 // Main function to handle cell clicks on the game board
 const handleCellClick = (row, col) => {
   // If no root type is selected, do nothing
@@ -63,10 +73,14 @@ const handleCellClick = (row, col) => {
   // If the bulb hasn't been placed and the selected root type is 'B', place the bulb
   if (!bulbPlaced[currentPlayer] && selectedRootType === 'B') {
     placeBulb(row, col);
+    addToGameHistory(`Player ${currentPlayer + 1} placed Bulb at (${row}, ${col})`);
+
   } 
   // Otherwise, if a root type and branch are selected, and the placement is valid, place the root
   else if (selectedRootType && selectedBranch && validPlacements.some(([r, c]) => r === row && c === col)) {
     placeRoot(row, col);
+    addToGameHistory(`Player ${currentPlayer + 1} placed ${selectedRootType} at (${row}, ${col}) on ${selectedBranch} branch`);
+
   }
 };
 
@@ -121,6 +135,8 @@ const placeRoot = (row, col) => {
     roots: [...newBranches[currentPlayer][selectedBranch].roots, { type: selectedRootType, position: [row, col] }]
   };
   setBranches(newBranches);
+
+  updateZoneControl(newBoard);
 
   // End the turn
   endTurn();
@@ -180,6 +196,49 @@ const handleAttack = (attackedPlayer, attackedRootType, row, col) => {
   }
 };
 
+
+const updateZoneControl = (newBoard) => {
+  const newZones = [...zones];
+  const zoneSize = 4;
+
+  for (let zone = 0; zone < 4; zone++) {
+    const startRow = Math.floor(zone / 2) * zoneSize;
+    const startCol = (zone % 2) * zoneSize;
+    const zoneCount = [0, 0];
+
+    for (let i = startRow; i < startRow + zoneSize; i++) {
+      for (let j = startCol; j < startCol + zoneSize; j++) {
+        const cell = newBoard[i][j];
+        if (cell && cell[2] === 'C') {
+          zoneCount[parseInt(cell[1]) - 1]++;
+        }
+      }
+    }
+
+    if (zoneCount[0] > zoneCount[1]) {
+      newZones[zone] = 0;
+    } else if (zoneCount[1] > zoneCount[0]) {
+      newZones[zone] = 1;
+    } else {
+      newZones[zone] = null;
+    }
+  }
+
+  setZones(newZones);
+  checkWinCondition(newZones);
+};
+
+  const checkWinCondition = (newZones) => {
+    const player1Zones = newZones.filter(zone => zone === 0).length;
+    const player2Zones = newZones.filter(zone => zone === 1).length;
+
+    if (player1Zones >= 3) {
+      setWinner(0);
+    } else if (player2Zones >= 3) {
+      setWinner(1);
+    }
+  };
+
   const endTurn = () => {
     setCurrentPlayer(1 - currentPlayer);
     setSelectedRootType(null);
@@ -192,9 +251,9 @@ const handleAttack = (attackedPlayer, attackedRootType, row, col) => {
     
     if (isValidPlacement) {
       if (selectedRootType === 'T' && cell && cell.startsWith(`P${opponentPlayer}`)) {
-        return 'bg-red-200'; // Light red (salmon) for attackable cells
+        return 'bg-red-200';
       }
-      return 'bg-green-200'; // Green for valid placements
+      return 'bg-green-200';
     }
     
     if (cell) {
@@ -205,18 +264,27 @@ const handleAttack = (attackedPlayer, attackedRootType, row, col) => {
   };
 
   const renderBoard = () => (
-    <div className="grid grid-cols-8 gap-1 w-96 h-96">
+    <div className="relative grid grid-cols-8 gap-1 w-96 h-96">
+      {/* Horizontal zone separator */}
+      <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-black z-10"></div>
+      {/* Vertical zone separator */}
+      <div className="absolute top-0 bottom-0 left-1/2 w-0.5 bg-black z-10"></div>
+      
       {board.map((row, rowIndex) =>
-        row.map((cell, colIndex) => (
-          <div
-            key={`${rowIndex}-${colIndex}`}
-            className={`w-full h-full border border-gray-300 flex items-center justify-center ${getCellColor(cell, rowIndex, colIndex)}`}
-            style={{ aspectRatio: '1 / 1' }}
-            onClick={() => handleCellClick(rowIndex, colIndex)}
-          >
-            {cell && <span className="text-sm font-bold">{cell}</span>}
-          </div>
-        ))
+        row.map((cell, colIndex) => {
+          const isZoneBorder = rowIndex % 4 === 0 || colIndex % 4 === 0;
+          return (
+            <div
+              key={`${rowIndex}-${colIndex}`}
+              className={`w-full h-full border flex items-center justify-center
+                ${getCellColor(cell, rowIndex, colIndex)}`}
+              style={{ aspectRatio: '1 / 1' }}
+              onClick={() => handleCellClick(rowIndex, colIndex)}
+            >
+              {cell && <span className="text-sm font-bold">{cell}</span>}
+            </div>
+          );
+        })
       )}
     </div>
   );
@@ -230,7 +298,7 @@ const handleAttack = (attackedPlayer, attackedRootType, row, col) => {
           className={`bg-gray-300 text-black w-full 
             ${selectedRootType === type ? 'bg-blue-300 ring-2 ring-blue-500' : ''}`}
           onClick={() => handleRootTypeSelect(type)}
-          disabled={resources[currentPlayer][type] === 0 || (type === 'B' && bulbPlaced[currentPlayer])}
+          disabled={resources[currentPlayer][type] === 0 || (type === 'B' && bulbPlaced[currentPlayer]) || winner !== null}
         >
           {type} ({resources[currentPlayer][type]})
         </Button>
@@ -247,7 +315,7 @@ const handleAttack = (attackedPlayer, attackedRootType, row, col) => {
             className={`bg-gray-300 text-black w-full mr-2
               ${selectedBranch === branch ? 'bg-blue-300 ring-2 ring-blue-500' : ''}`}
             onClick={() => handleBranchSelect(branch)}
-            disabled={!bulbPlaced[currentPlayer]}
+            disabled={!bulbPlaced[currentPlayer] || winner !== null}
           >
             {branch} ({branches[currentPlayer][branch].status})
           </Button>
@@ -267,6 +335,9 @@ const handleAttack = (attackedPlayer, attackedRootType, row, col) => {
           {type}: {resources[player][type]}
         </div>
       ))}
+      <div className="mt-2">
+        Zones Controlled: {zones.filter(zone => zone === player).length}
+      </div>
     </div>
   );
 
@@ -280,8 +351,11 @@ const handleAttack = (attackedPlayer, attackedRootType, row, col) => {
       <Card>
         <CardHeader>
           <CardTitle>
-            Game Board - Player {currentPlayer + 1}'s Turn
-            {!bulbPlaced[currentPlayer] && " (Place your Bulb)"}
+            {winner !== null 
+              ? `Game Over - Player ${winner + 1} Wins!`
+              : `Game Board - Player ${currentPlayer + 1}'s Turn
+                ${!bulbPlaced[currentPlayer] ? " (Place your Bulb)" : ""}`
+            }
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -291,6 +365,7 @@ const handleAttack = (attackedPlayer, attackedRootType, row, col) => {
               {renderResourceButtons()}
             </div>
             <div className="w-64">{renderBranchButtons()}</div>
+            <GameHistoryLog history={gameHistory} />
           </div>
           {error && <div className="text-red-500 mt-2">{error}</div>}
         </CardContent>
@@ -299,4 +374,4 @@ const handleAttack = (attackedPlayer, attackedRootType, row, col) => {
   );
 };
 
-export default RootRivalsGame;
+export default RootRivalsGame; 
